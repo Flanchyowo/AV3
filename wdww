@@ -1,0 +1,373 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+
+local Protection = {}
+Protection.protection_ON = false
+Protection.anti_httpspy = true
+Protection.anti_tamper = true
+Protection.baseline = {}
+Protection.connections = {}
+
+-- EXACT original events
+local on_httpspy_detect = Instance.new("BindableEvent")
+local on_antitamper_detect = Instance.new("BindableEvent")
+Protection.on_httpspy_detect = on_httpspy_detect
+Protection.on_antitamper_detect = on_antitamper_detect
+
+-- EXACT original locals
+local _det = "YOU GOT DETECTED - PLEASE STOP :)"
+local DETECT_MSG = "YOU GOT DETECTED - PLEASE STOP :)"
+
+-- EXACT original aliased functions
+local _pcall = pcall
+local _type = type
+local _tostring = tostring
+local _rawset = rawset
+local _rawget = rawget
+local _rawequal = rawequal
+local _pairs = pairs
+local _ipairs = ipairs
+local _select = select
+local _concat = table.concat
+local _insert = table.insert
+local _setmetatable = setmetatable
+local _getmetatable = getmetatable
+local _task_spawn = task.spawn
+local _task_wait = task.wait
+local _task_delay = task.delay
+local _os_clock = os.clock
+local _math_abs = math.abs
+local _math_random = math.random
+local _string_format = string.format
+local _string_byte = string.byte
+local _string_char = string.char
+local _string_rep = string.rep
+local _string_find = string.find
+local _string_lower = string.lower
+local _error = error
+local _assert = assert
+local _warn = warn
+
+local dbg_info = debug.info
+local dbg_getinfo = debug.getinfo
+local dbg_getupvalue = debug.getupvalue
+local dbg_traceback = debug.traceback
+local dbg_getconstants = _type(debug.getconstants) == "function" and debug.getconstants or nil
+
+local raw_request = request or (http and http.request) or (syn and syn.request)
+local raw_isfunctionhooked = isfunctionhooked
+local raw_ishooked = ishooked
+local raw_hookfunction = hookfunction
+local raw_checkcaller = checkcaller
+local raw_getfenv = rawgetfenv or getfenv
+
+-- EXACT original functions
+local function encode(s)
+    local t = {}
+    for i = 1, #s do _insert(t, _string_byte(s, i)) end
+    return t
+end
+
+local function decode(t)
+    local chars = {}
+    for _, b in _ipairs(t) do _insert(chars, _string_char(b)) end
+    return _concat(chars)
+end
+
+local KICKED = false
+local function kick(reason)
+    if KICKED then return end
+    KICKED = true
+    local encoded = encode(reason or "integrity violation")
+    _task_spawn(function()
+        for _ = 1, 5 do
+            _pcall(function() LocalPlayer:Kick(decode(encoded)) end)
+            _task_wait(0.05)
+        end
+    end)
+end
+
+local function shout()
+    _pcall(_error, "\n\n[ANTICHEAT] " .. DETECT_MSG .. "\n")
+    _pcall(_error, "[ANTICHEAT] " .. DETECT_MSG)
+    _pcall(_warn, "[ANTICHEAT] " .. DETECT_MSG)
+    _pcall(function()
+        print("=" .. _string_rep("=", 40))
+        print("!! " .. DETECT_MSG)
+        print("=" .. _string_rep("=", 40))
+    end)
+end
+
+-- Modular detection (replaces detectAndKick)
+local function httpspyDetect(reason)
+    if Protection.anti_httpspy then
+        shout()
+        kick(reason or DETECT_MSG)
+        on_httpspy_detect:Fire(reason)
+    end
+end
+
+local function antitamperDetect(reason)
+    if Protection.anti_tamper then
+        shout()
+        kick(reason or DETECT_MSG)
+        on_antitamper_detect:Fire(reason)
+    end
+end
+
+-- EXACT original task check functions
+local function _twcheck(what)
+    if what ~= "C" then antitamperDetect("task.wait hooked") end
+end
+
+local function _tscheck(what)
+    if what ~= "C" then antitamperDetect("task.spawn hooked") end
+end
+
+local function _tdcheck(what)
+    if what ~= "C" then antitamperDetect("task.delay hooked") end
+end
+
+-- EXACT original task checks
+local function originalTaskChecks()
+    local _twok, _twinfo = _pcall(dbg_getinfo, task.wait)
+    _twcheck(_twok and _twinfo and _twinfo.what or "hooked")
+
+    local _tsok, _tsinfo = _pcall(dbg_getinfo, task.spawn)
+    _tscheck(_tsok and _tsinfo and _tsinfo.what or "hooked")
+
+    local _tdok, _tdinfo = _pcall(dbg_getinfo, task.delay)
+    _tdcheck(_tdok and _tdinfo and _tdinfo.what or "hooked")
+end
+
+-- EXACT original heartbeat
+local function initHeartbeat()
+    local _heartbeatCount = 0
+    local _heartbeatConn = RunService.Heartbeat:Connect(function()
+        _heartbeatCount += 1
+    end)
+    repeat _task_wait() until _heartbeatCount >= 2
+    _heartbeatConn:Disconnect()
+end
+
+-- EXACT original HTTPSpy check
+local function originalHTTPSpyCheck()
+    local tb = _string_lower(dbg_traceback())
+    if _string_find(tb, "sandbox") or _string_find(tb, "unveilr") or _string_find(tb, "httpspy") then
+        httpspyDetect("logger signature in traceback")
+    end
+end
+
+-- EXACT original env check
+local function originalEnvCheck()
+    local envBad = false
+
+    if not _getmetatable or not _setmetatable or not _type or not _select then envBad = true end
+    if not _pcall or not debug or not _rawget or not _rawset then envBad = true end
+    if not _pcall(_rawset, {}, " ", " ") then envBad = true end
+    if _getmetatable(require) or _getmetatable(print) or _getmetatable(_error) then envBad = true end
+
+    do
+        local _trap = _setmetatable({}, {__index = function(self, ...) while true do end end})
+        local _ok, _mt = _pcall(_getmetatable, _trap)
+        if not _ok or _type(_rawget(_mt, "__index")) ~= "function" then envBad = true end
+    end
+
+    if ({dbg_info(print, 'a')})[1] ~= 0 then envBad = true end
+    if ({dbg_info(tostring, 'a')})[1] ~= 0 then envBad = true end
+    if ({dbg_info(print, 'a')})[2] ~= true then envBad = true end
+
+    if not raw_getfenv then envBad = true end
+    if _select(1, _pcall(raw_getfenv, 69)) == true then envBad = true end
+
+    do
+        local ok, dbginfo = _pcall(_rawget, debug, "info")
+        if not ok or not dbginfo then
+            envBad = true
+        else
+            if #(dbginfo(raw_getfenv, "n")) <= 1 then envBad = true end
+            if #(dbginfo(print, "n")) <= 1 then envBad = true end
+            if not dbginfo(print, "s") == "[C]" then envBad = true end
+            if not dbginfo(require, "s") == "[C]" then envBad = true end
+            if dbginfo((function() end), "s") == "[C]" then envBad = true end
+            if not _select(1, _pcall(dbg_info, coroutine.wrap(function() end)(), "s")) == false then envBad = true end
+        end
+    end
+
+    if envBad then
+        antitamperDetect("environment sanity check failed")
+    end
+end
+
+-- EXACT original JSON check
+local function originalJSONCheck()
+    local ok, result = _pcall(function()
+        return HttpService:JSONDecode('[68, "google.com", true, 1234, false, [1234, null, "meow"], null, ["b"]]')
+    end)
+    if not ok then
+        antitamperDetect("JSONDecode failed")
+    end
+    if result[6][2] ~= nil then
+        antitamperDetect("JSON null check failed")
+    end
+end
+
+-- EXACT original error check
+local function originalErrorCheck()
+    local _, msg = _pcall(function() game() end)
+    if not _string_find(msg, "attempt to call a Instance value") then
+        antitamperDetect("game() error message spoofed")
+    end
+end
+
+-- EXACT original fingerprint functions
+local function deepFingerprint(f)
+    if _type(f) ~= "function" then return nil end
+    local ok, info = _pcall(dbg_getinfo, f)
+    if not ok or not info then return nil end
+    local parts = {
+        info.what or "",
+        info.source or "",
+        _tostring(info.nups or ""),
+        _tostring(info.numparams or ""),
+        _tostring(info.isvararg or ""),
+    }
+    for i = 1, (info.nups or 0) do
+        local ok2, v = _pcall(dbg_getupvalue, f, i)
+        _insert(parts, ok2 and _tostring(v) or "?")
+    end
+    if dbg_getconstants then
+        local ok3, consts = _pcall(dbg_getconstants, f)
+        if ok3 and consts then
+            for _, c in _ipairs(consts) do _insert(parts, _tostring(c)) end
+        end
+    end
+    return _concat(parts, "|")
+end
+
+local function fnAddress(f)
+    if _type(f) ~= "function" then return nil end
+    return _tostring(f)
+end
+
+local function snapshotUpvalues(f)
+    if _type(f) ~= "function" then return {} end
+    local ok, info = _pcall(dbg_getinfo, f)
+    if not ok or not info then return {} end
+    local snap = {}
+    for i = 1, (info.nups or 0) do
+        local ok2, v = _pcall(dbg_getupvalue, f, i)
+        snap[i] = ok2 and _tostring(v) or "?"
+    end
+    return snap
+end
+
+local function checkUpvalues(f, snap)
+    if _type(f) ~= "function" then return false end
+    local ok, info = _pcall(dbg_getinfo, f)
+    if not ok or not info then return false end
+    for i = 1, (info.nups or 0) do
+        local ok2, v = _pcall(dbg_getupvalue, f, i)
+        local cur = ok2 and _tostring(v) or "?"
+        if cur ~= (snap[i] or "?") then return false end
+    end
+    return true
+end
+
+function Protection:snapshot(name, fn)
+    if fn == nil then return end
+    self.baseline[name] = {
+        fp = deepFingerprint(fn),
+        addr = fnAddress(fn),
+        uvs = snapshotUpvalues(fn),
+    }
+end
+
+-- EXACT original snapshots
+local function takeSnapshots()
+    Protection:snapshot("request", raw_request)
+    Protection:snapshot("isfunctionhooked", raw_isfunctionhooked)
+    Protection:snapshot("ishooked", raw_ishooked)
+    Protection:snapshot("hookfunction", raw_hookfunction)
+    Protection:snapshot("dbg_getinfo", dbg_info)
+    Protection:snapshot("checkcaller", raw_checkcaller)
+    Protection:snapshot("task_wait", task.wait)
+    Protection:snapshot("task_spawn", task.spawn)
+    Protection:snapshot("task_delay", task.delay)
+end
+
+-- EXACT original runtime monitoring
+local function runtimeMonitoring()
+    while Protection.protection_ON do
+        _task_wait(0.5)
+
+        _pcall(function()
+            local fnMap = {
+                request = raw_request,
+                isfunctionhooked = raw_isfunctionhooked,
+                ishooked = raw_ishooked,
+                hookfunction = raw_hookfunction,
+                dbg_getinfo = dbg_info,
+                checkcaller = raw_checkcaller,
+            }
+            for name, fn in _pairs(fnMap) do
+                if fn ~= nil and Protection.baseline[name] then
+                    local b = Protection.baseline[name]
+                    if raw_isfunctionhooked and raw_isfunctionhooked(fn) then
+                        antitamperDetect(name .. " is hooked (runtime)")
+                    end
+                    if deepFingerprint(fn) ~= b.fp then
+                        antitamperDetect(name .. " fingerprint changed")
+                    end
+                    if fnAddress(fn) ~= b.addr then
+                        antitamperDetect(name .. " address changed")
+                    end
+                    if not checkUpvalues(fn, b.uvs) then
+                        antitamperDetect(name .. " upvalues tampered")
+                    end
+                end
+            end
+        end)
+    end
+end
+
+-- Main start function
+function Protection:start()
+    self.protection_ON = true
+    
+    self.connections.main = _task_spawn(function()
+        initHeartbeat()
+        
+        -- EXACT original check sequence
+        if self.anti_httpspy then
+            originalHTTPSpyCheck()
+        end
+        
+        if self.anti_tamper then
+            originalTaskChecks()
+            originalEnvCheck()
+            originalJSONCheck()
+            originalErrorCheck()
+            takeSnapshots()
+        end
+        
+        -- EXACT original runtime loop
+        runtimeMonitoring()
+    end)
+end
+
+function Protection:stop()
+    self.protection_ON = false
+    self.anti_httpspy = false
+    self.anti_tamper = false
+    for _, conn in pairs(self.connections) do
+        if typeof(conn) == "thread" then
+            task.cancel(conn)
+        end
+    end
+    self.connections = {}
+end
+
+return Protection
