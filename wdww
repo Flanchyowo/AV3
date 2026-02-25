@@ -152,13 +152,7 @@ local function initHeartbeat()
     _heartbeatConn:Disconnect()
 end
 
--- EXACT original HTTPSpy check
-local function originalHTTPSpyCheck()
-    local tb = _string_lower(dbg_traceback())
-    if _string_find(tb, "sandbox") or _string_find(tb, "unveilr") or _string_find(tb, "httpspy") then
-        httpspyDetect("logger signature in traceback")
-    end
-end
+
 
 -- EXACT original env check
 local function originalEnvCheck()
